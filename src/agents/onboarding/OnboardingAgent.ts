@@ -1,5 +1,3 @@
-// src/agents/onboarding/OnboardingAgent.ts
-
 import { ChatOpenAI } from 'langchain/chat_models/openai';
 import { HumanMessage, SystemMessage } from 'langchain/schema';
 import { AIMessage } from 'langchain/schema';
