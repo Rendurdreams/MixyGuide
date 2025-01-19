@@ -20,8 +20,7 @@ const agent = new OnboardingAgent(process.env.OPENAI_API_KEY || '');
 // Routes
 app.post('/api/initialize', async (req, res) => {
     try {
-        const { experience } = req.body;
-        const response = await agent.initialize({ experience });
+        const response = await agent.initialize();  // No parameters needed
         res.json({ response });
     } catch (error) {
         console.error('Initialization error:', error);
@@ -31,7 +30,7 @@ app.post('/api/initialize', async (req, res) => {
 
 app.post('/api/chat', async (req, res) => {
     try {
-        const { message, messageCount } = req.body;
+        const { message } = req.body;
         const response = await agent.processUserInput(message);
         res.json({ response });
     } catch (error) {

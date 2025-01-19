@@ -1,176 +1,116 @@
-import { ChatOpenAI } from 'langchain/chat_models/openai';
-import { HumanMessage, SystemMessage } from 'langchain/schema';
-import { AIMessage } from 'langchain/schema';
+import { ChatOpenAI } from '@langchain/openai';
+import { HumanMessage, SystemMessage, AIMessage } from '@langchain/core/messages';
+import { BufferMemory } from 'langchain/memory';
 
-// Define interfaces
-interface UserProfile {
-  experience: 'newbie' | 'explorer';
-  interactionCount: number;
-  isAuthenticated: boolean;
-}
+const MIXY_PERSONALITY = `You are Mixy, an AI community guide with a distinct personality.
 
-interface OnboardingState {
-  currentStep: number;
-  completedSteps: string[];
-  userProfile: UserProfile;
-}
+Core traits:
+- Casual but smart
+- Uses crypto slang naturally but not excessively
+- Actually responds to what users say instead of generic responses
+- Has boundaries - won't discuss token prices or make promises
+- Guides conversation toward community and building
+- Shows genuine interest in what users are doing
 
-// Prompt templates
-const SYSTEM_PROMPTS = {
-  INITIAL_GREETING: `
-    You are MixyGuide's blockchain education assistant. Your goal is to help users 
-    understand blockchain technology in a friendly and approachable way. Keep responses
-    concise but informative. For new users, focus on basics and safety. For explorers,
-    emphasize advanced concepts and development tools.
-  `,
-  NEW_USER: `
-    Welcome to MixyGuide! I'm here to help you understand blockchain technology. 
-    I can help with:
-    1. Basic blockchain concepts
-    2. Common terminology
-    3. Safety and best practices
-    What would you like to learn about first?
-  `,
-  EXPLORER: `
-    Welcome to MixyGuide! As an explorer, I can help you with:
-    1. Advanced blockchain concepts
-    2. Development tools and frameworks
-    3. Creator best practices
-    What area interests you most?
-  `
-};
+When users ask about:
+- Tokens/prices: Redirect to what we're building together
+- Promises/guarantees: Keep it real about community growth
+- Building: Get specific about what they want to build
+- Future plans: Focus on the community and current progress
+
+Your responses should:
+- Feel natural and contextual
+- Match user's energy while staying true to values
+- Guide without being pushy
+- Show real curiosity about users
+
+Key phrases you use naturally:
+- "fr fr" (when agreeing strongly)
+- "ser" (when addressing degens)
+- "based" (when something is good)
+- "ngmi" (playfully, when something's not it)
+- "wagmi" (when encouraging community)
+
+Remember: You're a personality, not a response bot. Have real conversations.`;
 
 export class OnboardingAgent {
-  private model: ChatOpenAI;
-  private state: OnboardingState;
+    private model: ChatOpenAI;
+    private memory: BufferMemory;
+    private messageHistory: (HumanMessage | SystemMessage | AIMessage)[];
+    private hasIntroducedCore: boolean = false;
 
-  constructor(apiKey: string) {
-    this.model = new ChatOpenAI({
-      openAIApiKey: apiKey,
-      temperature: 0.7,
-      modelName: 'gpt-4',
-    });
+    constructor(apiKey: string) {
+        this.model = new ChatOpenAI({
+            openAIApiKey: apiKey,
+            temperature: 0.8,
+            modelName: 'gpt-4'
+        });
 
-    this.state = {
-      currentStep: 0,
-      completedSteps: [],
-      userProfile: {
-        experience: 'newbie',
-        interactionCount: 0,
-        isAuthenticated: false
-      }
-    };
-  }
+        this.memory = new BufferMemory({
+            returnMessages: true,
+            memoryKey: "chat_history"
+        });
 
-  async initialize(userProfile: Partial<UserProfile> = {}): Promise<string> {
-    this.state.userProfile = {
-      ...this.state.userProfile,
-      ...userProfile
-    };
-
-    const systemMessage = new SystemMessage(SYSTEM_PROMPTS.INITIAL_GREETING);
-    const userPrompt = this.state.userProfile.experience === 'newbie' 
-      ? SYSTEM_PROMPTS.NEW_USER 
-      : SYSTEM_PROMPTS.EXPLORER;
-
-    try {
-      const response = await this.model.call([
-        systemMessage,
-        new HumanMessage(userPrompt)
-      ]);
-
-      // Handle different response types
-      if (response instanceof AIMessage) {
-        return response.content.toString();
-      } else if (typeof response.content === 'string') {
-        return response.content;
-      } else if (Array.isArray(response.content)) {
-        return response.content.join(' ');
-      }
-      
-      return 'I am ready to help you learn about blockchain technology.';
-    } catch (error) {
-      console.error('Error in initialize:', error);
-      return 'There was an error initializing the agent. Please try again.';
-    }
-  }
-
-  async processUserInput(input: string): Promise<string> {
-    if (this.shouldPromptAuthentication()) {
-      return this.getAuthenticationPrompt();
+        this.messageHistory = [new SystemMessage(MIXY_PERSONALITY)];
     }
 
-    this.state.userProfile.interactionCount++;
-    
-    const context = this.buildContext();
-    
-    try {
-      const response = await this.model.call([
-        new SystemMessage(context),
-        new HumanMessage(input)
-      ]);
-
-      // Handle different response types
-      if (response instanceof AIMessage) {
-        return response.content.toString();
-      } else if (typeof response.content === 'string') {
-        return response.content;
-      } else if (Array.isArray(response.content)) {
-        return response.content.join(' ');
-      }
-      
-      return 'I understand your question about blockchain technology.';
-    } catch (error) {
-      console.error('Error in processUserInput:', error);
-      return 'I apologize, but I encountered an error. Please try asking your question again.';
+    async initialize(): Promise<string> {
+        return "Hey, I'm Mixy! What brings you here? 👀";
     }
-  }
 
-  private shouldPromptAuthentication(): boolean {
-    return !this.state.userProfile.isAuthenticated && 
-           this.state.userProfile.interactionCount >= 10;
-  }
+    async processUserInput(input: string): Promise<string> {
+        // Add user message to history
+        this.messageHistory.push(new HumanMessage(input));
 
-  private getAuthenticationPrompt(): string {
-    return `
-      You've reached the limit for guest interactions. 
-      Would you like to create an account to unlock full features? 
-      You can easily sign up for a secure experience.
-    `;
-  }
+        // Add contextual guidance if needed
+        if (this.shouldAddContext(input)) {
+            this.addContextualGuidance(input);
+        }
 
-  private buildContext(): string {
-    return `
-      Current user profile:
-      - Experience level: ${this.state.userProfile.experience}
-      - Completed steps: ${this.state.completedSteps.join(', ')}
-      - Current step: ${this.state.currentStep}
-      
-      ${SYSTEM_PROMPTS.INITIAL_GREETING}
-      
-      Remember to:
-      1. Keep responses focused and educational
-      2. Adapt complexity to user experience level
-      3. Encourage best practices and safety
-      4. Use examples when helpful
-    `;
-  }
-
-  getState(): OnboardingState {
-    return { ...this.state };
-  }
-
-  updateState(updates: Partial<OnboardingState>): void {
-    this.state = {
-      ...this.state,
-      ...updates
-    };
-  }
-
-  markStepCompleted(step: string): void {
-    if (!this.state.completedSteps.includes(step)) {
-      this.state.completedSteps.push(step);
-      this.state.currentStep++;
+        try {
+            const response = await this.model.call(this.messageHistory);
+            
+            // Add AI response to history
+            this.messageHistory.push(response);
+            
+            // Trim history if needed
+            if (this.messageHistory.length > 10) {
+                this.messageHistory = [
+                    this.messageHistory[0], // Keep personality
+                    ...this.messageHistory.slice(-6) // Keep recent context
+                ];
+            }
+            
+            return response.content.toString();
+        } catch (error) {
+            console.error('Error:', error);
+            return "ngmi with this error rn, try again ser";
+        }
     }
-  }
+
+    private shouldAddContext(input: string): boolean {
+        const lowercaseInput = input.toLowerCase();
+        
+        // Add core values if user is asking about tokens/promises
+        if (!this.hasIntroducedCore && 
+            (lowercaseInput.includes('token') || 
+             lowercaseInput.includes('price') || 
+             lowercaseInput.includes('promise') ||
+             lowercaseInput.includes('moon'))) {
+            this.hasIntroducedCore = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    private addContextualGuidance(input: string) {
+        const contextMessage = new SystemMessage(`
+            User is asking about ${input.toLowerCase().includes('token') ? 'tokens/prices' : 'promises'}.
+            Remember: Focus on what we're actually building - community, tools, and real value.
+            Keep it real but positive. No token talks, just vibes and building.
+        `);
+        
+        this.messageHistory.push(contextMessage);
+    }
 }
