@@ -17,6 +17,7 @@ app.use(express.static(path.join(__dirname, 'test-interface')));
 // Initialize agent
 const agent = new OnboardingAgent(process.env.OPENAI_API_KEY || '');
 
+
 // Routes
 app.post('/api/initialize', async (req, res) => {
     try {
